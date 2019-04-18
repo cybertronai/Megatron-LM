@@ -19,6 +19,7 @@ import os
 import random
 import numpy as np
 import torch
+import time
 
 from arguments import get_args
 from configure_data import configure_data
@@ -34,13 +35,72 @@ from utils import save_checkpoint
 from utils import load_checkpoint
 
 
+# global variables
+from collections import OrderedDict
+global_timeit_dict = OrderedDict()
+global_example_count = 0
+global_token_count = 0
+event_writer = None
+logdir = None
+
+from tensorboardX import SummaryWriter
+
+def log_tb(tag, val):
+    """Log value to tensorboard (relies on global_example_count rather than step count to give comparable graphs across
+    batch sizes)"""
+    global global_token_count, event_writer
+    event_writer.add_scalar(tag, val, global_token_count)
+
+
+def current_timestamp() -> str:
+    # timestamp format like 2019-04-15_11-29-51
+    current_seconds = time.time()
+
+    # correct to local timezone (PDT) if running on AWS (which is UTC)
+    import datetime
+    from pytz import reference
+    localtime = reference.LocalTimezone()
+    today = datetime.datetime.now()
+    timezone = localtime.tzname(today)
+
+    # TODO(y): use pytz for proper timezone conversion instead of -=
+    if timezone == 'UTC':
+        current_seconds -= 7 * 3600
+    else:
+        assert timezone == 'PDT'
+    time_str = time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime(current_seconds))
+    return time_str
+
+
+
+class timeit:
+    """Decorator to measure length of time spent in the block in millis and log
+  it to TensorBoard."""
+
+    def __init__(self, tag=""):
+        self.tag = tag
+
+    def __enter__(self):
+        self.start = time.perf_counter()
+        return self
+
+    def __exit__(self, *args):
+        self.end = time.perf_counter()
+        interval_ms = 1000 * (self.end - self.start)
+        global_timeit_dict.setdefault(self.tag, []).append(interval_ms)
+        newtag = 'times/' + self.tag
+        log_tb(newtag, interval_ms)
+
 def get_model(tokenizer, args):
     """Build the model."""
 
     print('building BERT model ...')
     model = BertModel(tokenizer, args)
+    num_of_params = sum([p.nelement() for p in model.parameters()])
     print(' > number of parameters: {}'.format(
-        sum([p.nelement() for p in model.parameters()])), flush=True)
+        num_of_params), flush=True)
+
+    log_tb('sizes/params', num_of_params)
 
     # GPU allocation.
     model.cuda(torch.cuda.current_device())
@@ -232,10 +292,17 @@ def backward_step(optimizer, model, lm_loss, nsp_loss, args):
     return lm_loss_reduced, nsp_loss_reduced
 
 
+tokens_in_batch = 1
 def train_step(input_data, model, criterion, optimizer, lr_scheduler, args):
     """Single training step."""
 
+    global tokens_in_batch
+    
     # Forward model for one step.
+    #    import pdb; pdb.set_trace()
+    data_batch = input_data['text']
+    tokens_in_batch = data_batch.shape[0]*data_batch.shape[1]
+    
     lm_loss, nsp_loss = forward_step(input_data, model, criterion, args)
 
     # Calculate gradients, reduce across processes, and clip.
@@ -261,6 +328,7 @@ def train_epoch(epoch, model, optimizer, train_data,
 
     # Turn on training mode which enables dropout.
     model.train()
+    global global_token_count
 
     # Tracking loss.
     total_lm_loss = 0.0
@@ -280,12 +348,21 @@ def train_epoch(epoch, model, optimizer, train_data,
     timers('interval time').start()
     while iteration < max_iters:
 
+        start_time = time.time()
         lm_loss, nsp_loss, skipped_iter = train_step(next(data_iterator),
                                                      model,
                                                      criterion,
                                                      optimizer,
                                                      lr_scheduler,
                                                      args)
+        end_time = time.time()
+        elapsed_time = (end_time - start_time)
+        log_tb('times/step', 1000*elapsed_time)
+        log_tb('times/tokens_per_sec', tokens_in_batch/elapsed_time)
+        log_tb('lr', optimizer.param_groups[0]['lr'])
+        #        log_tb('loss_scale', optimizer.loss_scale)
+        global_token_count += tokens_in_batch
+        
         skipped_iters += skipped_iter
         iteration += 1
 
@@ -300,6 +377,11 @@ def train_epoch(epoch, model, optimizer, train_data,
             avg_lm_loss = total_lm_loss.item() / args.log_interval
             elapsed_time = timers('interval time').elapsed()
             log_string = ' epoch{:2d} |'.format(epoch)
+            log_tb('loss_lm', avg_lm_loss)
+            log_tb('loss_nsp', avg_nsp_loss)
+            log_tb('epoch', epoch)
+
+
             log_string += ' iteration {:8d}/{:8d} |'.format(iteration,
                                                             max_iters)
             log_string += ' elapsed time per iteration (ms): {:.1f} |'.format(
@@ -394,6 +476,20 @@ def set_random_seed(seed):
 def main():
     """Main training program."""
 
+
+    global global_example_count, global_token_count, event_writer, logdir, train_step, train_loss, best_val_loss, eval_start_time, log_start_time, epoch
+
+    global_token_count = 0
+    
+    # Arguments.
+    args = get_args()
+    
+    # global global_example_count, global_token_count, event_writer, logdir
+    logdir = f'{args.logdir_root}/{args.run_name}-{current_timestamp()}'
+    os.system(f'mkdir -p {logdir}')
+
+    event_writer = SummaryWriter(logdir)
+    log_tb("first", time.time())
     print('Pretrain BERT model')
 
     # Disable CuDNN.
@@ -401,9 +497,6 @@ def main():
 
     # Timer.
     timers = Timers()
-
-    # Arguments.
-    args = get_args()
 
     # Pytorch distributed.
     initialize_distributed(args)
@@ -488,3 +581,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+# test
