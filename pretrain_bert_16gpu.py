@@ -21,40 +21,6 @@ args = parser.parse_args()
 ncluster.set_backend('aws')
 
 
-def get_nccl_rings(num_tasks, num_gpus):
-    ring = build_ring_order(range(num_tasks), range(num_gpus))
-    ring_rev = build_ring_order(reversed(range(num_tasks)),
-                                reversed(range(num_gpus)))
-    rotated_gpu_order = [3, 2, 1, 0, 7, 6, 5, 4]
-    skip_gpu_order = get_skip_order(num_gpus)
-    if (num_tasks >= 4) and (num_gpus == 8):
-        assert ((num_tasks % 4) == 0)
-        skip_machine_order = get_skip_order(num_tasks)
-        ring_skip = build_ring_order(skip_machine_order, rotated_gpu_order)
-        ring_skip_rev = build_ring_order(reversed(skip_machine_order),
-                                         skip_gpu_order)
-        rings_arr = [ring, ring_rev, ring_skip, ring_skip_rev]
-        # rings_arr = [ring, ring_rev, ring_skip]
-    else:
-        rings_arr = [ring, ring_rev]
-    return ' | '.join(rings_arr)
-
-
-def build_ring_order(machine_order, gpu_order):
-    gpu_order = list(gpu_order)
-    machine_order = list(machine_order)
-    ngpus = len(gpu_order)
-    r_order = [(x * ngpus) + y for x in machine_order for y in gpu_order]
-    return ' '.join(map(str, r_order))
-
-
-def get_skip_order(size):
-    if size == 4:
-        return [0, 2, 1, 3]
-    skip_step = 5 if size == 16 else 3
-    # step size of 3 yields - [0,3,6,1,4,7,2,5]
-    return [(i * skip_step) % size for i in range(size)]
-
 
 # routines to build NCCL ring orders
 def get_nccl_params(num_tasks, num_gpus):
