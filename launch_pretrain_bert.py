@@ -5,29 +5,30 @@ import argparse
 import ncluster
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--name', type=str, default='megatron16',
+parser.add_argument('--name', type=str, default='pretrain_bert',
                     help="name of the current run, used for machine naming and tensorboard visualization")
-parser.add_argument('--machines', type=int, default=2,
+parser.add_argument('--machines', type=int, default=1,
                     help="how many machines to use")
 parser.add_argument('--instance_type', type=str, default="p3dn.24xlarge",
                     help="which instance type to use")
 parser.add_argument('--image_name', type=str,
                     default='Deep Learning AMI (Ubuntu) Version 22.0',
                     help="name of AMI to use ")
-parser.add_argument('--nccl_rings', action='store_true', default=False,
-                    help='use special nccl ring setup')
+parser.add_argument('--num_rings', type=int, default=10,
+                    help='how many rings to use in multimachine setting')
 args = parser.parse_args()
 
 ncluster.set_backend('aws')
 
 
-
 # routines to build NCCL ring orders
-def get_nccl_params(num_tasks, num_gpus):
-    if num_tasks <= 1 or not args.nccl_rings:
-        return 'NCCL_DEBUG=VERSION'
-    nccl_rings = get_nccl_rings(num_tasks, num_gpus)
-    return f'NCCL_RINGS="{nccl_rings}" NCCL_SINGLE_RING_THRESHOLD=10 NCCL_DEBUG=VERSION'
+def get_nccl_params(num_tasks, _num_gpus):
+    params = 'NCCL_DEBUG=VERSION '
+    # todo(y): try NCCL_SINGLE_RING_THRESHOLD=10, custom ring definition
+    if num_tasks > 1:
+        params += 'NCCL_RINGS={args.num_rings} '
+
+    return params
 
 
 def main():
@@ -53,17 +54,18 @@ def main():
     MASTER_PORT = 6016
     NNODES = args.machines
 
-    train = open('bookcorpus.filelist.train').read()
+    train = open('bookcorpus.filelist.train').read().strip()
     validate = "/ncluster/data/bookcorpus.tfrecords/final_tfrecords_sharded/tf_examples.tfrecord000163"
     test = "/ncluster/data/bookcorpus.tfrecords/final_tfrecords_sharded/tf_examples.tfrecord000164"
 
     nccl_params = get_nccl_params(args.machines, num_gpus)
 
-    lr = 0.0001   # original learning rate for 256 global batch size
+    lr = 0.0001   # original learning rate for 256 global batch size/64 GPUs
 
     for i, task in enumerate(job.tasks):
         NODE_RANK = i
-        DISTRIBUTED_ARGS = f"--nproc_per_node {num_gpus} --nnodes {NNODES} --node_rank {NODE_RANK} --master_addr {MASTER_ADDR} --master_port {MASTER_PORT}"
+        DISTRIBUTED_ARGS = f"--nproc_per_node {num_gpus} --nnodes {NNODES} --node_rank {NODE_RANK} --master_addr " \
+            f"{MASTER_ADDR} --master_port {MASTER_PORT}"
 
         cmd = (f"{nccl_params} python -m torch.distributed.launch {DISTRIBUTED_ARGS} "
                f"pretrain_bert.py "
