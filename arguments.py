@@ -237,6 +237,9 @@ def add_data_args(parser):
                        help='Maximum number of predictions to use per sequence.'
                        'Defaults to math.ceil(`--seq-length`*.15/10)*10.'
                        'MUST BE SPECIFIED IF `--use-tfrecords` is True.')
+
+    parser.add_argument('--logdir', type=str, default='/ncluster/runs/unnamed', help="where logs and events go")
+    # todo(y): remove these two args
     parser.add_argument('--logdir_root', type=str, default='/ncluster/runs', help="where logs and events go")
     parser.add_argument('--run_name', type=str, default='megatron', help="name of run")
 
