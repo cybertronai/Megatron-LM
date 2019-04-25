@@ -9,7 +9,7 @@ parser.add_argument('--name', type=str, default='pretrain_bert',
                     help="name of the current run, used for machine naming and tensorboard visualization")
 parser.add_argument('--machines', type=int, default=1,
                     help="how many machines to use")
-parser.add_argument('--instance_type', type=str, default="p3dn.24xlarge",
+parser.add_argument('--instance_type', type=str, default="p3.2large",
                     help="which instance type to use")
 parser.add_argument('--image_name', type=str,
                     default='Deep Learning AMI (Ubuntu) Version 22.0',
@@ -46,8 +46,7 @@ def main():
     # workaround for https://github.com/tensorflow/models/issues/3995
     job.run('pip install -U protobuf')
 
-    num_gpus = 8
-    assert args.instance_type in ['p3.16xlarge', 'p3dn.24xlarge'], f"{args.instance_type} is not 8-gpu"
+    num_gpus = 1
 
     # WORLD_SIZE = num_gpus * args.machines
     MASTER_ADDR = job.tasks[0].ip
@@ -62,43 +61,37 @@ def main():
 
     lr = 0.0001   # original learning rate for 256 global batch size/64 GPUs
 
-    for i, task in enumerate(job.tasks):
-        NODE_RANK = i
-        DISTRIBUTED_ARGS = f"--nproc_per_node {num_gpus} --nnodes {NNODES} --node_rank {NODE_RANK} --master_addr " \
-            f"{MASTER_ADDR} --master_port {MASTER_PORT}"
-
-        cmd = (f"{nccl_params} python -m torch.distributed.launch {DISTRIBUTED_ARGS} "
-               f"pretrain_bert.py "
-               f"--batch-size 4 "
-               f"--tokenizer-type BertWordPieceTokenizer "
-               f"--cache-dir cache_dir "
-               f"--tokenizer-model-type bert-large-uncased "
-               f"--vocab-size 30522 "
-               f"--use-tfrecords "
-               f"--train-data {train} "
-               f"--valid-data {validate} "
-               f"--test-data {test} "
-               f"--max-preds-per-seq 80 "
-               f"--seq-length 512 "
-               f"--max-position-embeddings 512 "
-               f"--num-layers 24 "
-               f"--hidden-size 1024 "
-               f"--intermediate-size 4096 "
-               f"--num-attention-heads 16 "
-               f"--hidden-dropout 0.1 "
-               f"--attention-dropout 0.1 "
-               f"--train-iters 1000000 "
-               f"--lr {lr} "
-               f"--lr-decay-style linear "
-               f"--lr-decay-iters 990000 "
-               f"--warmup .01 "
-               f"--weight-decay 1e-2 "
-               f"--clip-grad 1.0 "
-               f"--fp16 "
-               f"--fp32-layernorm "
-               f"--fp32-embedding "
-               f"--hysteresis 2 "
-               f"--num-workers 2 ")
+    cmd = (f"pretrain_bert.py "
+           f"--batch-size 4 "
+           f"--tokenizer-type BertWordPieceTokenizer "
+           f"--cache-dir cache_dir "
+           f"--tokenizer-model-type bert-large-uncased "
+           f"--vocab-size 30522 "
+           f"--use-tfrecords "
+           f"--train-data {train} "
+           f"--valid-data {validate} "
+           f"--test-data {test} "
+           f"--max-preds-per-seq 80 "
+           f"--seq-length 512 "
+           f"--max-position-embeddings 512 "
+           f"--num-layers 24 "
+           f"--hidden-size 1024 "
+           f"--intermediate-size 4096 "
+           f"--num-attention-heads 16 "
+           f"--hidden-dropout 0.1 "
+           f"--attention-dropout 0.1 "
+           f"--train-iters 1000000 "
+           f"--lr {lr} "
+           f"--lr-decay-style linear "
+           f"--lr-decay-iters 990000 "
+           f"--warmup .01 "
+           f"--weight-decay 1e-2 "
+           f"--clip-grad 1.0 "
+           f"--fp16 "
+           f"--fp32-layernorm "
+           f"--fp32-embedding "
+           f"--hysteresis 2 "
+           f"--num-workers 2 ")
 
         # new params
         cmd += f"--logdir {job.logdir} "
