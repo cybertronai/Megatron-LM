@@ -99,7 +99,8 @@ def get_model(tokenizer, args):
     num_of_params = sum([p.nelement() for p in model.parameters()])
     print(' > number of parameters: {}'.format(
         num_of_params), flush=True)
-
+    print(model)
+    
     log_tb('sizes/params', num_of_params)
 
     # GPU allocation.
@@ -485,7 +486,7 @@ def main():
     args = get_args()
     
     # global global_example_count, global_token_count, event_writer, logdir
-    logdir = f'{args.logdir_root}/{args.run_name}-{current_timestamp()}'
+    logdir = f'{args.logdir}'
     os.system(f'mkdir -p {logdir}')
 
     event_writer = SummaryWriter(logdir)
