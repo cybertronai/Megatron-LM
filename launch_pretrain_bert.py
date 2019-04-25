@@ -23,10 +23,10 @@ ncluster.set_backend('aws')
 
 # routines to build NCCL ring orders
 def get_nccl_params(num_tasks, _num_gpus):
-    params = 'NCCL_DEBUG=VERSION '
+    params = f'NCCL_DEBUG=VERSION '
     # todo(y): try NCCL_SINGLE_RING_THRESHOLD=10, custom ring definition
     if num_tasks > 1:
-        params += 'NCCL_RINGS={args.num_rings} '
+        params += f'NCCL_MIN_NRINGS={args.num_rings} '
 
     return params
 
